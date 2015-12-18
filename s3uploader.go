@@ -84,25 +84,22 @@ func credential() string {
 //
 func policy(uuid, credential, amzDate string) string {
 	expiration := time.Now().Add(time.Minute * 15).UTC().Format(time.RFC3339)
-	s := `
-    {
-        "expiration": "` + expiration + `",
-        "conditions": [
-            {"x-amz-meta-uuid":"` + uuid + `"},
-            {"acl": "public-read"},
-            {"x-amz-date":"` + amzDate + `"},
-            {"bucket": "` + Bucket + `"},
-            {"x-amz-algorithm":"` + Algorithm + `"},
-            ["starts-with","$key","` + S3Path + `"],
-            ["starts-with", "$Content-Type", "image/"],
-            ["starts-with","$Cache-Control",""],
-            ["starts-with","$x-amz-credential","` + credential + `"],
-            ["content-length-range", 100, 10485760],
-            ["starts-with","$success_action_redirect","https://"]
-        ]
-    }
-    `
-	log.Println(s)
+	s := `{
+    "expiration": "` + expiration + `",
+    "conditions": [
+        {"x-amz-meta-uuid":"` + uuid + `"},
+        {"acl": "public-read"},
+        {"x-amz-date":"` + amzDate + `"},
+        {"bucket": "` + Bucket + `"},
+        {"x-amz-algorithm":"` + Algorithm + `"},
+        ["starts-with","$key","` + S3Path + `"],
+        ["starts-with", "$Content-Type", "image/"],
+        ["starts-with","$Cache-Control",""],
+        ["starts-with","$x-amz-credential","` + credential + `"],
+        ["content-length-range", 100, 10485760],
+        ["starts-with","$success_action_redirect","https://"]
+    ]
+}`
 	return s
 }
 
@@ -151,7 +148,7 @@ func preSignForm(w http.ResponseWriter, r *http.Request) {
 	form.Params["x-amz-date"] = amzDate
 	form.Params["x-amz-signature"] = sign(b64policy)
 	form.Params["policy"] = b64policy
-	form.Params["success_action_redirect"] = fmt.Sprintf("https://%s.s3.cn-north-1.amazonaws.com.cn/%s${filename}", Bucket, S3Path)
+	form.Params["success_action_redirect"] = form.Action + fmt.Sprintf("/%s${filename}", S3Path)
 
 	t.Execute(w, form)
 
