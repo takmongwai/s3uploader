@@ -10,9 +10,15 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
+
 	"time"
+
+	"flag"
+
+	"github.com/aws/aws-sdk-go/service/s3"
 
 	"html/template"
 
@@ -22,20 +28,64 @@ import (
 )
 
 const (
-	Debug     = true
-	Bucket    = "public"
-	S3Path    = "tmp/upload/"
 	Algorithm = "AWS4-HMAC-SHA256"
 )
 
 var awsSession *session.Session
+var SecretAccessKey string
+var AccessKeyID string
+var S3BucketURL string
+var S3 *s3.S3
+
+var Bucket string
+var S3Path string
+var Verbose bool
+var Port int
+
+func logger(v ...interface{}) {
+	if Verbose {
+		log.Println(v...)
+	}
+}
+
+func init() {
+	awsSession = AWSSession()
+	cs, err := awsSession.Config.Credentials.Get()
+	if err != nil {
+		panic(err)
+	}
+
+	SecretAccessKey = cs.SecretAccessKey
+	AccessKeyID = cs.AccessKeyID
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stdout,
+			"Usage: %s \n",
+			os.Args[0])
+		flag.PrintDefaults()
+	}
+
+	flag.StringVar(&Bucket, "bucket", "public", "set s3 bucket name")
+	flag.StringVar(&S3Path, "s3path", "tmp/upload/", "set s3 path prefix")
+	flag.BoolVar(&Verbose, "verbose", false, "Make the operation more talkative")
+	flag.IntVar(&Port, "port", 8000, "set listen port")
+	flag.Parse()
+
+	if !strings.HasSuffix(S3Path, "/") {
+		S3Path += "/"
+	}
+
+	S3 = s3.New(awsSession)
+	S3BucketURL = fmt.Sprintf("%s/%s", S3.Endpoint, Bucket)
+	logger("s3 bucket url:", S3BucketURL)
+}
 
 func AWSSession() *session.Session {
 	var once sync.Once
 	if awsSession == nil {
 		once.Do(func() {
 			cfg := defaults.Config().WithRegion("cn-north-1").WithCredentials(nil).WithMaxRetries(3)
-			if Debug {
+			if Verbose {
 				cfg.WithLogLevel(aws.LogDebugWithHTTPBody)
 			}
 			awsSession = session.New(cfg)
@@ -51,32 +101,21 @@ func makeHmac(key []byte, data []byte) []byte {
 	return hash.Sum(nil)
 }
 
-func makeSha256(data []byte) []byte {
-	hash := sha256.New()
-	hash.Write(data)
-	return hash.Sum(nil)
-}
-
-// 计算 police 的签名
 func sign(stringToSign string) string {
-	cs, _ := awsSession.Config.Credentials.Get()
-	secret := cs.SecretAccessKey
-
-	date := makeHmac([]byte("AWS4"+secret), []byte(time.Now().UTC().Format("20060102")))
+	date := makeHmac([]byte("AWS4"+SecretAccessKey), []byte(time.Now().UTC().Format("20060102")))
 	region := makeHmac(date, []byte(*awsSession.Config.Region))
-	service := makeHmac(region, []byte("s3"))
+	service := makeHmac(region, []byte(S3.ServiceName))
 	credentials := makeHmac(service, []byte("aws4_request"))
 	signature := makeHmac(credentials, []byte(stringToSign))
 	return hex.EncodeToString(signature)
 }
 
 func credential() string {
-	cs, _ := awsSession.Config.Credentials.Get()
 	return strings.Join([]string{
-		cs.AccessKeyID,
+		AccessKeyID,
 		time.Now().UTC().Format("20060102"),
 		*awsSession.Config.Region,
-		"s3",
+		S3.ServiceName,
 		"aws4_request",
 	}, "/")
 }
@@ -103,10 +142,6 @@ func policy(uuid, credential, amzDate string) string {
 	return s
 }
 
-func init() {
-	awsSession = AWSSession()
-}
-
 func UUID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
@@ -122,7 +157,7 @@ type Form struct {
 }
 
 func preSignForm(w http.ResponseWriter, r *http.Request) {
-	t, err := template.New("foo").Parse(formPage1)
+	t, err := template.New("main").Parse(formPage1)
 
 	if err != nil {
 		io.WriteString(w, err.Error())
@@ -137,7 +172,7 @@ func preSignForm(w http.ResponseWriter, r *http.Request) {
 	amzDate := time.Now().UTC().Format("20060102T150405Z")
 
 	b64policy := base64.StdEncoding.EncodeToString([]byte(policy(uuid, credential, amzDate)))
-	form.Action = fmt.Sprintf("https://%s.s3.cn-north-1.amazonaws.com.cn", Bucket)
+	form.Action = S3BucketURL
 	form.Params["acl"] = "public-read"
 	form.Params["key"] = S3Path + "${filename}"
 	form.Params["Content-Type"] = "image/jpeg"
@@ -149,7 +184,7 @@ func preSignForm(w http.ResponseWriter, r *http.Request) {
 	form.Params["x-amz-signature"] = sign(b64policy)
 	form.Params["policy"] = b64policy
 	form.Params["success_action_redirect"] = form.Action + fmt.Sprintf("/%s${filename}", S3Path)
-
+    
 	t.Execute(w, form)
 
 }
@@ -170,7 +205,7 @@ var formPage1 string = `
         <form action="{{.Action}}" method="post" enctype="multipart/form-data">
         {{range $k,$v := .Params}}<input type="hidden" name="{{$k}}" value="{{$v}}"/>
         {{end}}
-        上传图片: <input type="file" name="file"/>
+        Upload Picture: <input type="file" name="file"/>
         <input type="submit"/>
         </form>
     </body>
