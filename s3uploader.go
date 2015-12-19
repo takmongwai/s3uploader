@@ -184,7 +184,7 @@ func preSignForm(w http.ResponseWriter, r *http.Request) {
 	form.Params["x-amz-signature"] = sign(b64policy)
 	form.Params["policy"] = b64policy
 	form.Params["success_action_redirect"] = form.Action + fmt.Sprintf("/%s${filename}", S3Path)
-    
+
 	t.Execute(w, form)
 
 }
@@ -192,7 +192,7 @@ func preSignForm(w http.ResponseWriter, r *http.Request) {
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", preSignForm)
-	http.ListenAndServe(":"+Port, mux)
+	http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", Port), mux)
 }
 
 var formPage1 string = `
