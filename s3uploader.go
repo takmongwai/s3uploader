@@ -192,7 +192,7 @@ func preSignForm(w http.ResponseWriter, r *http.Request) {
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", preSignForm)
-	http.ListenAndServe(":8000", mux)
+	http.ListenAndServe(":"+Port, mux)
 }
 
 var formPage1 string = `
